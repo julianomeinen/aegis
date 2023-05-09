@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	keySize = 16
-	rsaSize = 256
+	blockSize = 16
+	keySize = 256
 )
 
 func main() {
@@ -73,7 +73,7 @@ func encryptFile(plainFilePath string, encryptedFilePath string) {
 		panic(err)
 	}
 
-    iv := make([]byte, 16)
+    iv := make([]byte, blockSize)
     if _, err := io.ReadFull(rand.Reader, iv); err != nil {
         panic(err)
     }
@@ -133,9 +133,9 @@ func decryptFile(encryptedFilePath string, plainFilePath string) {
 		return
 	}
 
-	iv := cipherBytes[:16]
-	encryptedSessionKey := cipherBytes[16:256+16]
-	encryptedContent := cipherBytes[(256+16):]
+	iv := cipherBytes[:blockSize]
+	encryptedSessionKey := cipherBytes[blockSize:keySize+blockSize]
+	encryptedContent := cipherBytes[(keySize+blockSize):]
 	
 	sessionKey, err := rsa.DecryptPKCS1v15(rand.Reader, privateKey, encryptedSessionKey)
 
@@ -242,7 +242,6 @@ func readPrivateKey(filename string) (*rsa.PrivateKey, error) {
 }
 
 func pkcs7Pad(data []byte) []byte {
-	blockSize := 16
 	padding := blockSize - len(data)%blockSize
 	padText := bytes.Repeat([]byte{byte(padding)}, padding)
 	return append(data, padText...)
