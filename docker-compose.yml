@@ -6,3 +6,4 @@ services:
       - "8080:8080"
     volumes:
       - ./app/files:/app/files
+      - ./app/tests/files:/app/tests/files

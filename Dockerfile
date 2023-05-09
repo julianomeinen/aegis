@@ -10,6 +10,8 @@ RUN go mod download
 
 RUN go mod tidy
 
+RUN go test -v
+
 RUN go build -o main .
 
 EXPOSE 8080
