@@ -7,27 +7,44 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
+	"bytes"
 )
 
 const (
-	keySize = 32 // AES-256
+	keySize = 16
 	rsaSize = 256
 )
 
 func main() {
 	
-	// Encrypt the file
-	encryptFile("./files/input.txt", "./files/input_encrypted.txt")
+	// // Encrypt the file
+	// encryptFile("./files/input.txt", "./files/input_encrypted.txt")
 
-	// Decrypt the file
-	decryptFile("./files/input_encrypted.txt", "./files/input_decrypted.txt")
+	// // Decrypt the file
+	// decryptFile("./files/input_encrypted.txt", "./files/input_decrypted.txt")
 
+	// // Encrypt the PDF file
+	// encryptFile("./files/file.pdf", "./files/file_encrypted.pdf")
+
+	// // Decrypt the PDF file
+	// decryptFile("./files/file_encrypted.pdf", "./files/file_decrypted.pdf")
+
+	// // Decrypt the PNG file
+	decryptFile("./files/file-encrypted-php.png", "./files/file-decrypted-go.png")
+
+	// same, err := compareFiles("./files/input.txt", "./files/input_decrypted.txt")
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// if same != true {
+	// 	panic("The content of the files is not the same.")
+	// }
+	
 }
 
 func encryptFile(plainFilePath string, encryptedFilePath string) {
@@ -38,7 +55,7 @@ func encryptFile(plainFilePath string, encryptedFilePath string) {
 	}
 
 	// Gerar uma chave de criptografia simétrica aleatória
-	key := make([]byte, keySize)
+	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		panic(err)
 	}
@@ -53,39 +70,58 @@ func encryptFile(plainFilePath string, encryptedFilePath string) {
 		panic(err)
 	}
 
+	// Defina o vetor de inicialização (IV)
+    iv := make([]byte, 16)
+    if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+        panic(err)
+    }
+
 	// Criptografar o conteúdo do arquivo usando a chave simétrica
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		panic(err)
 	}
-	nonce := make([]byte, 12)
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		panic(err)
-	}
-	aesgcm, err := cipher.NewGCM(block)
-	if err != nil {
-		panic(err)
-	}
-	cipherContent := aesgcm.Seal(nil, nonce, content, nil)
 
-	// Salvar a chave simétrica criptografada e o conteúdo do arquivo criptografado em um novo arquivo
-	file, err := os.Create(encryptedFilePath)
-	if err != nil {
-		panic(err)
-	}
-	defer file.Close()
+	// Add padding if needed
+	content = pkcs7Pad(content)
+	
+	// Crie um slice de bytes para armazenar o texto criptografado
+    ciphertext := make([]byte, len(content))
 
-	encoder := base64.NewEncoder(base64.StdEncoding, file)
-	encoder.Write(cipherKey)
-	encoder.Write(nonce)
-	encoder.Write(cipherContent)
-	encoder.Close()
+	// Crie um cifrador de bloco CBC com o bloco AES-128-CBC e o vetor de inicialização
+	mode := cipher.NewCBCEncrypter(block, iv)
 
-	fmt.Println("cipherKey:", cipherKey)
-	fmt.Println("nonce:", nonce)
-	fmt.Println("cipherContent:", cipherContent)
+	// Cifre o texto utilizando o método Ciphertext do cifrador de bloco CBC
+	mode.CryptBlocks(ciphertext, content)
+	
+	cipherContent := ciphertext
+
+	// Grava o plaintext decifrado em um arquivo
+	file, err := os.OpenFile(encryptedFilePath, os.O_RDWR|os.O_CREATE, 0644)
+    if err != nil {
+        panic(err)
+    }
+    defer file.Close()
+
+    if err := file.Truncate(0); err != nil {
+        panic(err)
+    }
+
+    _, err = file.Seek(0, 0)
+    if err != nil {
+        panic(err)
+    }
+
+	// concatenate the byte slices
+	byteSlice := bytes.Join([][]byte{iv, cipherKey, cipherContent}, []byte{})
+
+    if _, err := file.Write(byteSlice); err != nil {
+        panic(err)
+    }
+        
 	fmt.Println("key:", key)
-
+	fmt.Println("cipherContent:", len(cipherContent))
+	
 	fmt.Println("Arquivo criptografado com sucesso")
 
 }
@@ -101,26 +137,15 @@ func decryptFile(encryptedFilePath string, plainFilePath string) {
 	}
 
 	// Lê o arquivo criptografado
-	ciphertext, err := os.ReadFile(encryptedFilePath)
+	cipherBytes, err := os.ReadFile(encryptedFilePath)
 	if err != nil {
 		fmt.Println("Erro ao ler o arquivo criptografado:", err)
 		return
 	}
 
-	// Decodifica o arquivo
-	cipherBytes, err := base64.StdEncoding.DecodeString(string(ciphertext))
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	// Divide o arquivo criptografado em duas partes: a chave de sessão criptografada e o conteúdo criptografado
-	encryptedSessionKey := cipherBytes[:rsaSize]
-	encryptedNonce := cipherBytes[rsaSize:rsaSize+12]
-	encryptedContent := cipherBytes[rsaSize+12:]
-
-	fmt.Println("encryptedSessionKey:", encryptedSessionKey)
-	fmt.Println("encryptedNonce:", encryptedNonce)
-	fmt.Println("encryptedContent:", encryptedContent)
+	 iv := cipherBytes[:16]
+	 encryptedSessionKey := cipherBytes[16:256+16]
+	 encryptedContent := cipherBytes[(256+16):]
 	
 	sessionKey, err := rsa.DecryptOAEP(sha256.New(), nil, privateKey, encryptedSessionKey, nil)
 
@@ -138,20 +163,36 @@ func decryptFile(encryptedFilePath string, plainFilePath string) {
 		return
 	}
 
-	aesgcm, err := cipher.NewGCM(block)
-	if err != nil {
-		panic(err.Error())
-	}
+	// Define o modo de operação
+    mode := cipher.NewCBCDecrypter(block, iv)
 
-	plaintext, err := aesgcm.Open(nil, encryptedNonce, encryptedContent, nil)
-	if err != nil {
-		panic(err.Error())
-	}
+	// Descriptografa o texto cifrado
+    plaintext := make([]byte, len(encryptedContent))
+    mode.CryptBlocks(plaintext, encryptedContent)
 
+	// Remove padding if needed
+	plaintext = pkcs7Unpad(plaintext)
+	
 	// Grava o plaintext decifrado em um arquivo
-	if err := ioutil.WriteFile(plainFilePath, plaintext, os.ModePerm); err != nil {
-		panic(err)
-	}
+	file, err := os.OpenFile(plainFilePath, os.O_RDWR|os.O_CREATE, 0644)
+    if err != nil {
+        panic(err)
+    }
+    defer file.Close()
+
+    if err := file.Truncate(0); err != nil {
+        panic(err)
+    }
+
+    _, err = file.Seek(0, 0)
+    if err != nil {
+        panic(err)
+    }
+
+    _, err = file.Write(plaintext)
+    if err != nil {
+        panic(err)
+    }
 
 	fmt.Println("Arquivo descriptografado com sucesso!")
 
@@ -221,4 +262,30 @@ func readPrivateKey(filename string) (*rsa.PrivateKey, error) {
 	}
 
     return rsaKey, nil
+}
+
+func pkcs7Pad(data []byte) []byte {
+	blockSize := 16
+	padding := blockSize - len(data)%blockSize
+	padText := bytes.Repeat([]byte{byte(padding)}, padding)
+	return append(data, padText...)
+}
+
+func pkcs7Unpad(data []byte) []byte {
+	padding := int(data[len(data)-1])
+	return data[:len(data)-padding]
+}
+
+func compareFiles(file1, file2 string) (bool, error) {
+    content1, err := ioutil.ReadFile(file1)
+    if err != nil {
+        return false, err
+    }
+
+    content2, err := ioutil.ReadFile(file2)
+    if err != nil {
+        return false, err
+    }
+
+    return bytes.Equal(content1, content2), nil
 }
